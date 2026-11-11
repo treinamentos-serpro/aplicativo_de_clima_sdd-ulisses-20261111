@@ -1,17 +1,21 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWeather } from '../../../src/hooks/useWeather';
-import { WeatherServiceError, getWeather, searchCities } from '../../../src/services/weatherService';
-import type { City, WeatherData } from '../../../src/types/weather';
+import {
+  WeatherServiceError,
+  getCurrentWeather,
+  getForecast,
+} from '../../../src/services/weatherService';
+import type { City, CurrentWeather, ForecastDay } from '../../../src/types/weather';
 
 vi.mock('../../../src/services/weatherService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/weatherService')>()),
-  searchCities: vi.fn(),
-  getWeather: vi.fn(),
+  getCurrentWeather: vi.fn(),
+  getForecast: vi.fn(),
 }));
 
-const searchCitiesMock = vi.mocked(searchCities);
-const getWeatherMock = vi.mocked(getWeather);
+const getCurrentWeatherMock = vi.mocked(getCurrentWeather);
+const getForecastMock = vi.mocked(getForecast);
 
 const seattle: City = {
   id: 1,
@@ -22,129 +26,176 @@ const seattle: City = {
   timezone: 'America/Los_Angeles',
 };
 
-const weatherData = { city: seattle, forecast: [], fetchedAt: '' } as unknown as WeatherData;
+const current = { observedAt: '2026-11-11T14:00', temperatureC: 14 } as unknown as CurrentWeather;
+const forecast = [{ date: '2026-11-11', hours: [] }] as unknown as ForecastDay[];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe('useWeather', () => {
   beforeEach(() => {
-    searchCitiesMock.mockReset();
-    getWeatherMock.mockReset();
+    getCurrentWeatherMock.mockReset();
+    getForecastMock.mockReset();
   });
 
-  it('começa em idle', () => {
+  it('começa sem cidade e com estados idle', () => {
     const { result } = renderHook(() => useWeather());
 
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.city).toBeNull();
+    expect(result.current.current).toEqual({ status: 'idle' });
+    expect(result.current.forecast).toEqual({ status: 'idle' });
   });
 
-  it('texto vazio volta para idle sem chamar o service', async () => {
+  it('select dispara clima atual e previsão como requisições independentes', async () => {
+    getCurrentWeatherMock.mockResolvedValue(current);
+    getForecastMock.mockResolvedValue(forecast);
     const { result } = renderHook(() => useWeather());
 
-    await act(() => result.current.search('   '));
+    await act(async () => {
+      result.current.select(seattle);
+    });
 
-    expect(searchCitiesMock).not.toHaveBeenCalled();
-    expect(getWeatherMock).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.city).toEqual(seattle);
+    expect(getCurrentWeatherMock).toHaveBeenCalledWith(seattle);
+    expect(getForecastMock).toHaveBeenCalledWith(seattle);
+    expect(result.current.current).toEqual({ status: 'success', data: current });
+    expect(result.current.forecast).toEqual({ status: 'success', data: forecast });
   });
 
-  it('busca → seleção → clima resulta em success com a primeira cidade', async () => {
-    searchCitiesMock.mockResolvedValue([seattle]);
-    getWeatherMock.mockResolvedValue(weatherData);
+  it('falha da previsão não altera o clima atual', async () => {
+    getCurrentWeatherMock.mockResolvedValue(current);
+    getForecastMock.mockRejectedValue(new WeatherServiceError('timeout'));
     const { result } = renderHook(() => useWeather());
 
-    await act(() => result.current.search('Seattle'));
+    await act(async () => {
+      result.current.select(seattle);
+    });
 
-    expect(searchCitiesMock).toHaveBeenCalledWith('Seattle');
-    expect(getWeatherMock).toHaveBeenCalledWith(seattle);
-    expect(result.current.state).toEqual({ status: 'success', data: weatherData });
+    expect(result.current.current).toEqual({ status: 'success', data: current });
+    expect(result.current.forecast).toMatchObject({ status: 'error', error: { kind: 'timeout' } });
   });
 
-  it('lista vazia resulta em empty e não busca clima', async () => {
-    searchCitiesMock.mockResolvedValue([]);
+  it('falha do clima atual não altera a previsão', async () => {
+    getCurrentWeatherMock.mockRejectedValue(new WeatherServiceError('network'));
+    getForecastMock.mockResolvedValue(forecast);
     const { result } = renderHook(() => useWeather());
 
-    await act(() => result.current.search('xyz'));
+    await act(async () => {
+      result.current.select(seattle);
+    });
 
-    expect(getWeatherMock).not.toHaveBeenCalled();
-    expect(result.current.state).toEqual({ status: 'empty' });
+    expect(result.current.current).toMatchObject({ status: 'error', error: { kind: 'network' } });
+    expect(result.current.forecast).toEqual({ status: 'success', data: forecast });
   });
 
-  it('erro do service resulta em error com o WeatherServiceError', async () => {
-    const error = new WeatherServiceError('timeout');
-    searchCitiesMock.mockRejectedValue(error);
+  it('previsão sem dias vira empty', async () => {
+    getCurrentWeatherMock.mockResolvedValue(current);
+    getForecastMock.mockResolvedValue([]);
     const { result } = renderHook(() => useWeather());
 
-    await act(() => result.current.search('Recife'));
+    await act(async () => {
+      result.current.select(seattle);
+    });
 
-    expect(result.current.state).toEqual({ status: 'error', error });
+    expect(result.current.forecast).toEqual({ status: 'empty' });
   });
 
-  it('erro inesperado (fora do WeatherServiceError) vira error do tipo invalid', async () => {
-    searchCitiesMock.mockRejectedValue(new TypeError('falha inesperada'));
+  it('erro inesperado vira error do tipo invalid', async () => {
+    getCurrentWeatherMock.mockRejectedValue(new TypeError('falha inesperada'));
+    getForecastMock.mockResolvedValue(forecast);
     const { result } = renderHook(() => useWeather());
 
-    await act(() => result.current.search('Recife'));
+    await act(async () => {
+      result.current.select(seattle);
+    });
 
-    expect(result.current.state).toMatchObject({ status: 'error', error: { kind: 'invalid' } });
+    expect(result.current.current).toMatchObject({ status: 'error', error: { kind: 'invalid' } });
   });
 
-  it('erro ao buscar o clima também resulta em error', async () => {
-    searchCitiesMock.mockResolvedValue([seattle]);
-    getWeatherMock.mockRejectedValue(new WeatherServiceError('network'));
-    const { result } = renderHook(() => useWeather());
-
-    await act(() => result.current.search('Seattle'));
-
-    expect(result.current.state).toMatchObject({ status: 'error', error: { kind: 'network' } });
-  });
-
-  it('retry refaz a última busca', async () => {
-    searchCitiesMock
+  it('retryCurrent refaz só o clima atual', async () => {
+    getCurrentWeatherMock
       .mockRejectedValueOnce(new WeatherServiceError('network'))
-      .mockResolvedValueOnce([seattle]);
-    getWeatherMock.mockResolvedValue(weatherData);
+      .mockResolvedValueOnce(current);
+    getForecastMock.mockResolvedValue(forecast);
     const { result } = renderHook(() => useWeather());
 
-    await act(() => result.current.search('  Seattle '));
-    expect(result.current.state.status).toBe('error');
+    await act(async () => {
+      result.current.select(seattle);
+    });
+    await act(async () => {
+      result.current.retryCurrent();
+    });
 
-    await act(() => result.current.retry());
-
-    expect(searchCitiesMock).toHaveBeenCalledTimes(2);
-    expect(searchCitiesMock).toHaveBeenLastCalledWith('Seattle');
-    expect(result.current.state).toEqual({ status: 'success', data: weatherData });
+    expect(getCurrentWeatherMock).toHaveBeenCalledTimes(2);
+    expect(getForecastMock).toHaveBeenCalledTimes(1);
+    expect(result.current.current).toEqual({ status: 'success', data: current });
   });
 
-  it('resposta de uma busca antiga não sobrescreve a nova', async () => {
-    const first = deferred<City[]>();
-    const second = deferred<City[]>();
-    searchCitiesMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    getWeatherMock.mockResolvedValue(weatherData);
+  it('retryForecast refaz só a previsão', async () => {
+    getCurrentWeatherMock.mockResolvedValue(current);
+    getForecastMock
+      .mockRejectedValueOnce(new WeatherServiceError('http', 500))
+      .mockResolvedValueOnce(forecast);
     const { result } = renderHook(() => useWeather());
 
-    let firstSearch!: Promise<void>;
-    let secondSearch!: Promise<void>;
+    await act(async () => {
+      result.current.select(seattle);
+    });
+    await act(async () => {
+      result.current.retryForecast();
+    });
+
+    expect(getCurrentWeatherMock).toHaveBeenCalledTimes(1);
+    expect(getForecastMock).toHaveBeenCalledTimes(2);
+    expect(result.current.forecast).toEqual({ status: 'success', data: forecast });
+  });
+
+  it('resposta antiga é descartada quando outra cidade é selecionada', async () => {
+    const first = deferred<CurrentWeather>();
+    const other: City = { ...seattle, id: 2, name: 'Recife' };
+    getCurrentWeatherMock.mockReturnValueOnce(first.promise).mockResolvedValueOnce(current);
+    getForecastMock.mockResolvedValue(forecast);
+    const { result } = renderHook(() => useWeather());
+
     act(() => {
-      firstSearch = result.current.search('Santos');
-      secondSearch = result.current.search('Seattle');
-    });
-
-    await act(async () => {
-      second.resolve([seattle]);
-      await secondSearch;
+      result.current.select(seattle);
     });
     await act(async () => {
-      first.resolve([]);
-      await firstSearch;
+      result.current.select(other);
+    });
+    await act(async () => {
+      first.resolve({ ...current, temperatureC: 99 });
     });
 
-    expect(result.current.state).toEqual({ status: 'success', data: weatherData });
+    expect(result.current.city).toEqual(other);
+    expect(result.current.current).toEqual({ status: 'success', data: current });
+  });
+
+  it('clear remove a cidade e descarta respostas pendentes', async () => {
+    const pending = deferred<CurrentWeather>();
+    getCurrentWeatherMock.mockReturnValue(pending.promise);
+    getForecastMock.mockResolvedValue(forecast);
+    const { result } = renderHook(() => useWeather());
+
+    act(() => {
+      result.current.select(seattle);
+    });
+    act(() => {
+      result.current.clear();
+    });
+    await act(async () => {
+      pending.resolve(current);
+    });
+
+    expect(result.current.city).toBeNull();
+    expect(result.current.current).toEqual({ status: 'idle' });
+    expect(result.current.forecast).toEqual({ status: 'idle' });
   });
 });

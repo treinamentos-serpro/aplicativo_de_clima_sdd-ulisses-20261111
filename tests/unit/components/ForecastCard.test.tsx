@@ -55,7 +55,7 @@ describe('ForecastCard', () => {
       />,
     );
 
-    expect(screen.getByText('não disponível', { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getAllByText('não disponível', { selector: 'span' }).length).toBeGreaterThan(0);
     expect(screen.queryByText(/máx/)).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,9 @@ coverage/
 playwright-report/
 test-results/
 
+# Build info
+*.tsbuildinfo
+
 # Logs
 *.log
 npm-debug.log*

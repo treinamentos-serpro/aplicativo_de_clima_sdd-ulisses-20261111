@@ -1,4 +1,12 @@
-import type { ForecastDay, HourlyForecast, WeatherData } from '../types/weather';
+import type { City, CurrentWeather, ForecastDay, HourlyForecast } from '../types/weather';
+
+/** Agregado completo usado só nos fixtures de UI (o tipo foi removido de `types/weather.ts`). */
+interface WeatherData {
+  city: City;
+  current: CurrentWeather;
+  forecast: ForecastDay[];
+  fetchedAt: string;
+}
 
 /**
  * Dados de exemplo para desenvolver a UI sem a API.

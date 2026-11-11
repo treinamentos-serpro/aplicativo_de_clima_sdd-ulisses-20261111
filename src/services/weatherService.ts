@@ -5,7 +5,6 @@ import type {
   CurrentWeather,
   ForecastDay,
   HourlyForecast,
-  WeatherData,
   WeatherErrorKind,
 } from '../types/weather';
 
@@ -15,6 +14,8 @@ const SEARCH_RESULT_LIMIT = 5;
 const CURRENT_FIELDS =
   'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,pressure_msl,precipitation';
 const HOURLY_FIELDS = 'temperature_2m,weather_code,precipitation,precipitation_probability';
+/** Formato `YYYY-MM-DDTHH:mm` (com `timezone=auto`, a API devolve a hora local da cidade). */
+const HOURLY_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
 export const REQUEST_TIMEOUT_MS = 3000;
 
@@ -36,6 +37,11 @@ export class WeatherServiceError extends Error {
     this.kind = kind;
     this.status = status;
   }
+}
+
+/** Normaliza qualquer falha para `WeatherServiceError`; falha inesperada vira `invalid`. */
+export function toWeatherError(error: unknown): WeatherServiceError {
+  return error instanceof WeatherServiceError ? error : new WeatherServiceError('invalid');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -87,26 +93,37 @@ export async function searchCities(name: string): Promise<City[]> {
   return parseCities(body);
 }
 
-/** Clima atual e previsão de 5 dias (em Celsius) para a cidade. */
-export async function getWeather(city: City): Promise<WeatherData> {
+/** Clima atual da cidade (em Celsius). Requisição independente da previsão (D-P2). */
+export async function getCurrentWeather(city: City): Promise<CurrentWeather> {
   const params = new URLSearchParams({
     latitude: String(city.latitude),
     longitude: String(city.longitude),
     timezone: 'auto',
     current: CURRENT_FIELDS,
-    hourly: HOURLY_FIELDS,
-    forecast_days: String(MAX_FORECAST_DAYS),
     wind_speed_unit: 'kmh',
   });
   const body = await fetchJson(`${FORECAST_URL}?${params}`);
 
   const current = parseCurrent(body);
-  const forecast = parseForecast(body);
-  if (!current || forecast.length !== MAX_FORECAST_DAYS) {
-    throw new WeatherServiceError('invalid');
-  }
+  if (!current) throw new WeatherServiceError('invalid');
+  return current;
+}
 
-  return { city, current, forecast, fetchedAt: new Date().toISOString() };
+/**
+ * Previsão horária até 5 dias (em Celsius). Requisição independente do clima atual (D-P2).
+ * Sem dias válidos retorna `[]` (estado vazio, AC-RF06.3); resposta sem `hourly` é `invalid`.
+ */
+export async function getForecast(city: City): Promise<ForecastDay[]> {
+  const params = new URLSearchParams({
+    latitude: String(city.latitude),
+    longitude: String(city.longitude),
+    timezone: 'auto',
+    hourly: HOURLY_FIELDS,
+    forecast_days: String(MAX_FORECAST_DAYS),
+  });
+  const body = await fetchJson(`${FORECAST_URL}?${params}`);
+
+  return parseForecast(body);
 }
 
 function parseCities(body: unknown): City[] {
@@ -168,15 +185,16 @@ function parseCurrent(body: unknown): CurrentWeather | null {
   return hasAnyValue ? data : null;
 }
 
+/** Horas com `time` fora de `YYYY-MM-DDTHH:mm` são descartadas (evita "NaN undefined" na UI). */
 function parseForecast(body: unknown): ForecastDay[] {
-  if (!isRecord(body) || !isRecord(body.hourly)) return [];
+  if (!isRecord(body) || !isRecord(body.hourly)) throw new WeatherServiceError('invalid');
 
   const hourly = body.hourly;
   const times = Array.isArray(hourly.time) ? hourly.time : [];
   const entries: HourlyForecast[] = [];
 
   times.forEach((time, index) => {
-    if (typeof time !== 'string') return;
+    if (typeof time !== 'string' || !HOURLY_TIME_PATTERN.test(time)) return;
     entries.push({
       time,
       temperatureC: toNumber(valueAt(hourly.temperature_2m, index)),

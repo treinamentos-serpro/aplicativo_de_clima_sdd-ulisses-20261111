@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { SAO_PAULO_OPTION, searchAndSelectCity } from './support/cityFlow';
 import { mockOpenMeteo } from './support/openMeteo';
 
 const MIN_TOUCH_TARGET_PX = 44;
@@ -9,8 +10,7 @@ test.describe('Experiência mobile', () => {
   test('não tem rolagem horizontal em 320px (AC-08.1)', async ({ page }) => {
     await mockOpenMeteo(page);
     await page.goto('/');
-    await page.getByRole('textbox', { name: 'Buscar cidade' }).fill('São Paulo');
-    await page.getByRole('button', { name: 'Buscar' }).click();
+    await searchAndSelectCity(page, 'São Paulo');
     await expect(page.getByRole('region', { name: 'Próximos dias' })).toBeVisible();
 
     const overflow = await page.evaluate(() => ({
@@ -46,8 +46,9 @@ test.describe('Experiência mobile', () => {
     await page.getByRole('textbox', { name: 'Buscar cidade' }).tap();
     await page.getByRole('textbox', { name: 'Buscar cidade' }).fill('São Paulo');
     await page.getByRole('button', { name: 'Buscar' }).tap();
+    await page.getByRole('button', { name: SAO_PAULO_OPTION }).tap();
 
-    await expect(page.getByRole('region', { name: 'São Paulo, São Paulo, Brasil' })).toBeVisible();
+    await expect(page.getByRole('region', { name: SAO_PAULO_OPTION })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Próximos dias' }).getByRole('article')).toHaveCount(5);
 
     await page.getByRole('button', { name: '°F' }).tap();
@@ -76,6 +77,7 @@ test.describe('Experiência mobile', () => {
     await page.goto('/');
     await page.getByRole('textbox', { name: 'Buscar cidade' }).fill(longName);
     await page.getByRole('button', { name: 'Buscar' }).click();
+    await page.getByRole('button', { name: `${longName}, São Paulo, Brasil` }).click();
     await expect(page.getByRole('region', { name: 'Próximos dias' })).toBeVisible();
 
     const overflow = await page.evaluate(() => ({
@@ -95,8 +97,9 @@ test.describe('Fluxo mobile em 375×812', () => {
 
     await page.getByRole('textbox', { name: 'Buscar cidade' }).fill('São Paulo');
     await page.getByRole('button', { name: 'Buscar' }).tap();
+    await page.getByRole('button', { name: SAO_PAULO_OPTION }).tap();
 
-    await expect(page.getByRole('region', { name: 'São Paulo, São Paulo, Brasil' })).toContainText('24°C');
+    await expect(page.getByRole('region', { name: SAO_PAULO_OPTION })).toContainText('24°C');
     await expect(page.getByRole('region', { name: 'Próximos dias' }).getByRole('article')).toHaveCount(5);
   });
 });

@@ -37,6 +37,11 @@ export function getDayLabel(iso: string, index: number): string {
   return WEEKDAYS[date.getDay()];
 }
 
+/** Extrai a hora de um horário ISO local (`YYYY-MM-DDTHH:mm`) como "HH:mm". */
+export function getHourLabel(iso: string): string {
+  return iso.slice(11, 16);
+}
+
 /** Formata a data como "12 Jun". */
 export function getShortDate(iso: string): string {
   const date = parseLocalDate(iso);

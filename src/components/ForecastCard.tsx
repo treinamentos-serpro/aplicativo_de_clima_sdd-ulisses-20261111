@@ -3,6 +3,7 @@ import { getDayLabel, getShortDate } from '../lib/format';
 import { toDisplayTemperature } from '../lib/temperature';
 import { getConditionIcon } from '../lib/weatherCodes';
 import type { ForecastDay, Unit } from '../types/weather';
+import ForecastHourList from './ForecastHourList';
 
 interface ForecastCardProps {
   day: ForecastDay;
@@ -52,6 +53,12 @@ export default function ForecastCard({ day, index, unit }: ForecastCardProps) {
           ? 'precipitação não disponível'
           : `${summary.precipitationMm} mm`}
       </p>
+      <details className="w-full">
+        <summary className="min-h-11 cursor-pointer py-2 text-center text-sm text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400">
+          Ver {day.hours.length} horas
+        </summary>
+        <ForecastHourList hours={day.hours} unit={unit} />
+      </details>
     </article>
   );
 }

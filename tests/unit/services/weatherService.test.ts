@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   REQUEST_TIMEOUT_MS,
   WeatherServiceError,
-  getWeather,
+  getCurrentWeather,
+  getForecast,
   searchCities,
 } from '../../../src/services/weatherService';
 import type { City } from '../../../src/types/weather';
@@ -207,11 +208,11 @@ describe('weatherService', () => {
     });
   });
 
-  describe('getWeather', () => {
-    it('monta uma única requisição com current, hourly, 5 dias e km/h', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({ ...currentBody, ...hourlyBody(120) }));
+  describe('getCurrentWeather', () => {
+    it('monta uma requisição só com current, em km/h e fuso automático', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(currentBody));
 
-      await getWeather(city);
+      await getCurrentWeather(city);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const url = requestUrl();
@@ -219,19 +220,15 @@ describe('weatherService', () => {
       expect(url.searchParams.get('latitude')).toBe('47.60621');
       expect(url.searchParams.get('longitude')).toBe('-122.33207');
       expect(url.searchParams.get('timezone')).toBe('auto');
-      expect(url.searchParams.get('forecast_days')).toBe('5');
       expect(url.searchParams.get('wind_speed_unit')).toBe('kmh');
       expect(url.searchParams.get('current')).toContain('pressure_msl');
-      expect(url.searchParams.get('hourly')).toContain('precipitation_probability');
+      expect(url.searchParams.has('hourly')).toBe(false);
     });
 
-    it('retorna WeatherData com exatamente 5 dias de 24 horas', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({ ...currentBody, ...hourlyBody(120) }));
+    it('mapeia o bloco current para CurrentWeather', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(currentBody));
 
-      const data = await getWeather(city);
-
-      expect(data.city).toEqual(city);
-      expect(data.current).toEqual({
+      await expect(getCurrentWeather(city)).resolves.toEqual({
         observedAt: '2026-11-11T14:00',
         temperatureC: 14.2,
         condition: 'Nublado',
@@ -240,25 +237,14 @@ describe('weatherService', () => {
         pressureHpa: 1015.6,
         precipitationMm: 0,
       });
-      expect(data.forecast).toHaveLength(5);
-      expect(data.forecast.every((day) => day.hours.length === 24)).toBe(true);
-      expect(data.forecast[0].hours[0]).toEqual({
-        time: '2026-11-11T00:00',
-        temperatureC: 20,
-        condition: 'Céu limpo',
-        precipitationMm: 0,
-        precipitationProbability: 0,
-      });
     });
 
-    it('campos ausentes do current viram null', async () => {
+    it('campos ausentes viram null', async () => {
       fetchMock.mockResolvedValue(
-        jsonResponse({ current: { time: '2026-11-11T14:00', temperature_2m: 20 }, ...hourlyBody(120) }),
+        jsonResponse({ current: { time: '2026-11-11T14:00', temperature_2m: 20 } }),
       );
 
-      const data = await getWeather(city);
-
-      expect(data.current).toMatchObject({
+      await expect(getCurrentWeather(city)).resolves.toMatchObject({
         temperatureC: 20,
         relativeHumidity: null,
         windSpeedKmh: null,
@@ -268,40 +254,80 @@ describe('weatherService', () => {
       });
     });
 
-    it('previsão incompleta (menos de 5 dias) lança invalid', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({ ...currentBody, ...hourlyBody(72) }));
-
-      await expect(getWeather(city)).rejects.toMatchObject({ kind: 'invalid' });
-    });
-
     it('resposta sem current válido lança invalid', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({ current: { time: '2026-11-11T14:00' }, ...hourlyBody(120) }));
+      fetchMock.mockResolvedValue(jsonResponse({ current: { time: '2026-11-11T14:00' } }));
 
-      await expect(getWeather(city)).rejects.toMatchObject({ kind: 'invalid' });
+      await expect(getCurrentWeather(city)).rejects.toMatchObject({ kind: 'invalid' });
     });
 
-    it('resposta sem o objeto current lança invalid', async () => {
+    it('erro HTTP lança WeatherServiceError com status', async () => {
+      fetchMock.mockResolvedValue(new Response('', { status: 429 }));
+
+      await expect(getCurrentWeather(city)).rejects.toMatchObject({ kind: 'http', status: 429 });
+    });
+  });
+
+  describe('getForecast', () => {
+    it('monta uma requisição só com hourly, 5 dias e fuso automático', async () => {
       fetchMock.mockResolvedValue(jsonResponse(hourlyBody(120)));
 
-      await expect(getWeather(city)).rejects.toMatchObject({ kind: 'invalid' });
+      await getForecast(city);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const url = requestUrl();
+      expect(url.origin + url.pathname).toBe('https://api.open-meteo.com/v1/forecast');
+      expect(url.searchParams.get('timezone')).toBe('auto');
+      expect(url.searchParams.get('forecast_days')).toBe('5');
+      expect(url.searchParams.get('hourly')).toContain('precipitation_probability');
+      expect(url.searchParams.has('current')).toBe(false);
+    });
+
+    it('retorna dias de 24 horas com o formato de cada hora', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(hourlyBody(120)));
+
+      const days = await getForecast(city);
+
+      expect(days).toHaveLength(5);
+      expect(days.every((day) => day.hours.length === 24)).toBe(true);
+      expect(days[0].hours[0]).toEqual({
+        time: '2026-11-11T00:00',
+        temperatureC: 20,
+        condition: 'Céu limpo',
+        precipitationMm: 0,
+        precipitationProbability: 0,
+      });
     });
 
     it('descarta horas com time inválido e mantém as demais do dia', async () => {
       const body = hourlyBody(120);
       body.hourly.time[0] = null as unknown as string;
-      fetchMock.mockResolvedValue(jsonResponse({ ...currentBody, ...body }));
+      fetchMock.mockResolvedValue(jsonResponse(body));
 
-      const data = await getWeather(city);
+      const days = await getForecast(city);
 
-      expect(data.forecast).toHaveLength(5);
-      expect(data.forecast[0].hours).toHaveLength(23);
-      expect(data.forecast[0].hours[0].time).toBe('2026-11-11T01:00');
+      expect(days).toHaveLength(5);
+      expect(days[0].hours).toHaveLength(23);
+      expect(days[0].hours[0].time).toBe('2026-11-11T01:00');
     });
 
-    it('erro HTTP do forecast lança WeatherServiceError com status', async () => {
+    it('sem horas válidas retorna [] (estado vazio, AC-RF06.3)', async () => {
+      const body = hourlyBody(24);
+      body.hourly.time = body.hourly.time.map(() => 'data-inválida');
+      fetchMock.mockResolvedValue(jsonResponse(body));
+
+      await expect(getForecast(city)).resolves.toEqual([]);
+    });
+
+    it('resposta sem o bloco hourly lança invalid', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(currentBody));
+
+      await expect(getForecast(city)).rejects.toMatchObject({ kind: 'invalid' });
+    });
+
+    it('erro HTTP lança WeatherServiceError com status', async () => {
       fetchMock.mockResolvedValue(new Response('', { status: 429 }));
 
-      await expect(getWeather(city)).rejects.toMatchObject({ kind: 'http', status: 429 });
+      await expect(getForecast(city)).rejects.toMatchObject({ kind: 'http', status: 429 });
     });
   });
 });

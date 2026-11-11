@@ -37,13 +37,22 @@ export interface ForecastDay {
   hours: HourlyForecast[];
 }
 
-/** Dados completos de uma cidade, montados pela camada de services. */
-export interface WeatherData {
-  city: City;
-  current: CurrentWeather;
-  forecast: ForecastDay[];
-  fetchedAt: string;
-}
-
 /** Categoria de falha da camada de services (ver `WeatherServiceError`). */
 export type WeatherErrorKind = 'network' | 'timeout' | 'http' | 'invalid';
+
+/** Erro de services já pronto para a UI (`message` em pt-BR). */
+export interface WeatherError extends Error {
+  kind: WeatherErrorKind;
+  status?: number;
+}
+
+/**
+ * Estado de uma requisição isolada. `empty` vale para listas sem itens
+ * (busca sem cidades ou previsão sem dias válidos).
+ */
+export type AsyncState<T> =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'empty' }
+  | { status: 'error'; error: WeatherError }
+  | { status: 'success'; data: T };
