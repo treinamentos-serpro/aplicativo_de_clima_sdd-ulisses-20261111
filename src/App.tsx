@@ -19,17 +19,16 @@ export default function App() {
   const resultRef = useRef<HTMLDivElement>(null);
 
   const { search: runSearch, reset: resetSearch } = search;
-  const { select, clear, retryCurrent, retryForecast } = weather;
+  const { select, retryCurrent, retryForecast } = weather;
   const searchStatus = search.state.status;
   const currentStatus = weather.current.status;
 
   const handleSearch = useCallback(
     (text: string) => {
       lastQuery.current = text;
-      clear();
       runSearch(text);
     },
-    [clear, runSearch],
+    [runSearch],
   );
   const handleRetrySearch = useCallback(() => runSearch(lastQuery.current), [runSearch]);
   const handleSelect = useCallback(
