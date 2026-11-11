@@ -1,8 +1,9 @@
 import type { ForecastDay, HourlyForecast } from '../types/weather';
 
 export const MAX_FORECAST_DAYS = 5;
+const HOURS_PER_DAY = 24;
 
-/** Agrupa entradas horárias por dia local (`YYYY-MM-DD`), limitando a `MAX_FORECAST_DAYS` dias. */
+/** Agrupa entradas horárias por dia local (`YYYY-MM-DD`). Mantém só dias com 24 horas, até `MAX_FORECAST_DAYS` (AC-02.1). */
 export function groupHourlyByDay(entries: HourlyForecast[]): ForecastDay[] {
   const hoursByDate = new Map<string, HourlyForecast[]>();
 
@@ -16,5 +17,7 @@ export function groupHourlyByDay(entries: HourlyForecast[]): ForecastDay[] {
     }
   }
 
-  return Array.from(hoursByDate, ([date, hours]) => ({ date, hours })).slice(0, MAX_FORECAST_DAYS);
+  return Array.from(hoursByDate, ([date, hours]) => ({ date, hours }))
+    .filter((day) => day.hours.length === HOURS_PER_DAY)
+    .slice(0, MAX_FORECAST_DAYS);
 }

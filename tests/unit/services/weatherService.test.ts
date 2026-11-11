@@ -298,16 +298,16 @@ describe('weatherService', () => {
       });
     });
 
-    it('descarta horas com time inválido e mantém as demais do dia', async () => {
+    it('oculta o dia incompleto (menos de 24 horas) e mantém os dias completos (AC-02.1)', async () => {
       const body = hourlyBody(120);
       body.hourly.time[0] = null as unknown as string;
       fetchMock.mockResolvedValue(jsonResponse(body));
 
       const days = await getForecast(city);
 
-      expect(days).toHaveLength(5);
-      expect(days[0].hours).toHaveLength(23);
-      expect(days[0].hours[0].time).toBe('2026-11-11T01:00');
+      expect(days).toHaveLength(4);
+      expect(days.every((day) => day.hours.length === 24)).toBe(true);
+      expect(days[0].date).toBe('2026-11-12');
     });
 
     it('sem horas válidas retorna [] (estado vazio, AC-RF06.3)', async () => {
