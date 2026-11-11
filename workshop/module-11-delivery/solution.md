@@ -5,7 +5,8 @@ A automação de deploy já está pronta no repositório.
 ## Como funciona
 
 O workflow [`.github/workflows/pages.yml`](../../.github/workflows/pages.yml)
-dispara em push para `main`:
+dispara quando o workflow `CI` conclui com sucesso em `main` (ou manualmente via
+`workflow_dispatch`):
 
 1. **Build do app** com `VITE_BASE=/${{ github.event.repository.name }}/app/` —
    garante que os assets apontem para o subcaminho correto do Pages.
@@ -30,10 +31,19 @@ Sem isso, os assets seriam buscados na raiz do domínio e dariam 404.
 
 ## Validação local
 
+`pnpm preview` não entrega os assets quando `VITE_BASE` tem subcaminho, então
+monte o site como o workflow e sirva de forma estática:
+
 ```bash
-VITE_BASE=/sdd-weather-app/app/ pnpm build
-pnpm preview
+VITE_BASE=/<repo>/app/ pnpm build
+rm -rf /tmp/pages-sim && mkdir -p /tmp/pages-sim/<repo>/app
+cp -r docs/. /tmp/pages-sim/<repo>/ && cp -r dist/. /tmp/pages-sim/<repo>/app/
+cp -r workshop /tmp/pages-sim/<repo>/workshop
+cd /tmp/pages-sim && python3 -m http.server 8080
 ```
+
+Acesse `http://localhost:8080/<repo>/app/`. Os arquivos `.js` devem responder
+com `text/javascript`, sem 404 no console.
 
 ## Configuração do repositório (uma vez)
 
@@ -46,4 +56,5 @@ pnpm preview
 - App: `https://<user>.github.io/<repo>/app/`
 
 Ciclo SDD completo: **Brief → Spec → Plan → Tasks → Code → Test → Review →
-Ship**. O Weather App está no ar.
+Ship**. Após o merge em `main` e a habilitação do Pages, o Weather App estará no
+ar nas URLs acima.
